@@ -1,0 +1,6 @@
+{
+  "name": "CodeMotion Studio",
+  "description": "Deterministic mobile-style motion-graphics video editor with 26 animation effects, timeline editing, script generator, and MP4 export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
