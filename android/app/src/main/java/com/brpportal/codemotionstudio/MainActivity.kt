@@ -17,6 +17,9 @@ import android.webkit.JavascriptInterface
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -66,6 +69,8 @@ class MainActivity : ComponentActivity() {
             javaScriptEnabled = true
             domStorageEnabled = true
             allowFileAccess = true
+            allowFileAccessFromFileURLs = true
+            allowUniversalAccessFromFileURLs = true
             allowContentAccess = true
             mediaPlaybackRequiresUserGesture = false
             builtInZoomControls = false
@@ -83,7 +88,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState != null && webView.restoreState(savedInstanceState) != null) {
             // State restore ho gaya — dobara load nahi karna.
         } else {
-            webView.loadUrl("file:///android_asset/www/index.html")
+            webView.loadUrl("https://$APP_HOST/assets/www/index.html")
         }
     }
 
@@ -169,12 +174,74 @@ class MainActivity : ComponentActivity() {
     // ------------------------------------------------------------------
 
     private inner class StudioWebViewClient : WebViewClient() {
+
+        /**
+         * WebViewAssetLoader wala tareeqa (bina androidx.webkit ke, haath se):
+         * https://appassets.androidplatform.net/assets/... ki har request ko
+         * APK ke assets/ se serve karo. Is se web app ek asal https origin
+         * par chalti hai — file:// par ES module scripts CORS ki wajah se
+         * ruk jate thay aur screen blank aati thi (Al ke phone par yehi hua).
+         */
+        override fun shouldInterceptRequest(
+            view: WebView?,
+            request: WebResourceRequest?
+        ): WebResourceResponse? {
+            val url = request?.url ?: return null
+            if (url.host != APP_HOST) return null
+            val assetPath = url.path?.removePrefix("/") ?: return null
+            if (!assetPath.startsWith("assets/")) return null
+            return try {
+                val stream = assets.open(assetPath)
+                val mime = mimeForPath(assetPath)
+                WebResourceResponse(mime, if (isTextMime(mime)) "UTF-8" else null, stream).apply {
+                    responseHeaders = mapOf("Access-Control-Allow-Origin" to "*")
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        override fun onReceivedError(
+            view: WebView?,
+            request: WebResourceRequest?,
+            error: WebResourceError?
+        ) {
+            super.onReceivedError(view, request, error)
+            if (request?.isForMainFrame == true) {
+                toast("Page load error: ${error?.description}")
+            }
+        }
+
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
             // Blob-anchor downloads ko page ke andar hi rok kar bridge ko do.
             view?.evaluateJavascript(BLOB_BRIDGE_JS, null)
         }
     }
+
+    private fun mimeForPath(path: String): String {
+        return when (path.substringAfterLast('.', "").lowercase()) {
+            "html", "htm" -> "text/html"
+            "js", "mjs" -> "text/javascript"
+            "css" -> "text/css"
+            "json" -> "application/json"
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            "svg" -> "image/svg+xml"
+            "ico" -> "image/x-icon"
+            "woff" -> "font/woff"
+            "woff2" -> "font/woff2"
+            "ttf" -> "font/ttf"
+            "mp4" -> "video/mp4"
+            "txt" -> "text/plain"
+            else -> "application/octet-stream"
+        }
+    }
+
+    private fun isTextMime(mime: String): Boolean =
+        mime.startsWith("text/") || mime == "application/json" || mime == "image/svg+xml"
 
     private inner class StudioDownloadListener : DownloadListener {
         override fun onDownloadStart(
@@ -324,6 +391,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val BRIDGE_NAME = "CMBridge"
+        private const val APP_HOST = "appassets.androidplatform.net"
 
         private val EXT_TO_MIME = mapOf(
             ".json" to "application/json",
